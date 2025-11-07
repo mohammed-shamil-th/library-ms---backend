@@ -7,6 +7,9 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "seed:admin": "node scripts/seedAdmin.js",
+    "seed:data": "node scripts/seedData.js",
+    "seed:all": "node scripts/seedData.js",
+    "seed:clear": "node scripts/seedData.js --clear",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

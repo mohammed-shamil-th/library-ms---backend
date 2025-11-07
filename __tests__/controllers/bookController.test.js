@@ -10,17 +10,32 @@ let adminUser;
 let regularUser;
 let regularToken;
 
+// Increase default timeout for all tests
+jest.setTimeout(30000);
+
 // Test database connection
 const TEST_MONGODB_URI = process.env.MONGODB_URI_TEST || 'mongodb://localhost:27017/library-test';
 
 describe('POST /api/books - Create Book', () => {
   beforeAll(async () => {
-    // Connect to test database
+    // Set timeout for beforeAll hook
+    jest.setTimeout(30000); // 30 seconds
+
+    // Close any existing connections first
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+    }
+
+    // Connect to test database with connection options
     try {
-      await mongoose.connect(TEST_MONGODB_URI);
+      await mongoose.connect(TEST_MONGODB_URI, {
+        serverSelectionTimeoutMS: 10000, // 10 seconds timeout
+        socketTimeoutMS: 45000,
+      });
       console.log('Test database connected');
     } catch (error) {
       console.error('Test database connection error:', error);
+      throw error; // Re-throw to fail the test if connection fails
     }
 
     // Create admin user for testing
@@ -53,14 +68,30 @@ describe('POST /api/books - Create Book', () => {
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '1h' }
     );
-  });
+  }, 30000); // 30 second timeout for beforeAll
 
   afterAll(async () => {
-    // Clean up
-    await Book.deleteMany({});
-    await User.deleteMany({});
-    await mongoose.connection.close();
-  });
+    // Set timeout for afterAll hook
+    jest.setTimeout(30000); // 30 seconds
+
+    try {
+      // Clean up
+      await Book.deleteMany({});
+      await User.deleteMany({});
+      
+      // Close connection properly
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.connection.close();
+        console.log('Test database connection closed');
+      }
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      // Force close if normal close fails
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.connection.close(true);
+      }
+    }
+  }, 30000); // 30 second timeout for afterAll
 
   beforeEach(async () => {
     // Clear books before each test

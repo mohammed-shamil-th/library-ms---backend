@@ -41,6 +41,7 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "testTimeout": 30000,
     "coveragePathIgnorePatterns": [
       "/node_modules/",
       "/config/",
@@ -48,6 +49,8 @@
     ],
     "testMatch": [
       "**/__tests__/**/*.test.js"
-    ]
+    ],
+    "forceExit": true,
+    "detectOpenHandles": true
   }
 }

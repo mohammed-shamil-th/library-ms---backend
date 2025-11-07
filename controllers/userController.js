@@ -129,10 +129,14 @@ const getUserStats = async (req, res) => {
       }
     });
     
-    const favoriteCategory = Object.keys(categoryCount).reduce((a, b) =>
-      categoryCount[a] > categoryCount[b] ? a : b,
-      null
-    );
+    // Find favorite category - handle empty case
+    let favoriteCategory = 'N/A';
+    const categoryKeys = Object.keys(categoryCount);
+    if (categoryKeys.length > 0) {
+      favoriteCategory = categoryKeys.reduce((a, b) =>
+        categoryCount[a] > categoryCount[b] ? a : b
+      );
+    }
 
     res.status(200).json({
       success: true,
@@ -149,7 +153,7 @@ const getUserStats = async (req, res) => {
           overdueBorrows,
           returnedBorrows,
           totalFine: totalFine.toFixed(2),
-          favoriteCategory: favoriteCategory || 'N/A',
+          favoriteCategory,
         },
       },
     });

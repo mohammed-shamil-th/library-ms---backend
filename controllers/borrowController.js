@@ -542,6 +542,66 @@ const deleteBorrow = async (req, res) => {
   }
 };
 
+// @desc    Export borrow history to CSV
+// @route   GET /api/borrows/history/:userId/export
+// @access  Private
+const exportBorrowHistory = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user.id;
+    const userRole = req.user.role;
+
+    // Check authorization
+    if (userRole !== 'admin' && userId !== currentUserId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to export this user\'s history',
+      });
+    }
+
+    const borrows = await Borrow.find({ user: userId })
+      .populate('book', 'title author isbn')
+      .populate('user', 'name email')
+      .sort({ borrowDate: -1 });
+
+    // Convert to CSV
+    const csvHeader = 'Borrow Date,Due Date,Return Date,Book Title,Author,ISBN,Status,Fine\n';
+    const csvRows = borrows.map(borrow => {
+      const borrowDate = borrow.borrowDate ? new Date(borrow.borrowDate).toLocaleDateString() : '';
+      const dueDate = borrow.dueDate ? new Date(borrow.dueDate).toLocaleDateString() : '';
+      const returnDate = borrow.returnDate ? new Date(borrow.returnDate).toLocaleDateString() : '';
+      const title = borrow.book?.title || '';
+      const author = borrow.book?.author || '';
+      const isbn = borrow.book?.isbn || '';
+      const status = borrow.status || '';
+      const fine = borrow.fine || 0;
+      
+      // Escape quotes in CSV
+      const escapeCSV = (str) => {
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+      
+      return `${escapeCSV(borrowDate)},${escapeCSV(dueDate)},${escapeCSV(returnDate)},${escapeCSV(title)},${escapeCSV(author)},${escapeCSV(isbn)},${escapeCSV(status)},${fine}`;
+    }).join('\n');
+
+    const csv = csvHeader + csvRows;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=borrow-history-${userId}-${Date.now()}.csv`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Export borrow history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   borrowBook,
   returnBook,
@@ -551,5 +611,6 @@ module.exports = {
   getOverdueBorrows,
   createBorrowAdmin,
   deleteBorrow,
+  exportBorrowHistory,
 };
 

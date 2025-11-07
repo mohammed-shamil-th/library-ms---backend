@@ -224,10 +224,35 @@ const getBorrowingTrends = async (req, res) => {
   }
 };
 
+// @desc    Get active members count (public endpoint for home page)
+// @route   GET /api/dashboard/active-members-count
+// @access  Public
+const getActiveMembersCount = async (req, res) => {
+  try {
+    const activeMembers = await User.countDocuments({ 
+      isActive: true,
+      role: 'user' 
+    });
+    
+    res.status(200).json({
+      success: true,
+      data: { activeMembers }
+    });
+  } catch (error) {
+    console.error('Get active members count error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getPopularBooks,
   getActiveUsers,
   getBorrowingTrends,
+  getActiveMembersCount,
 };
 

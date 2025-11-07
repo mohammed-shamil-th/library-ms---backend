@@ -9,6 +9,7 @@ const {
   getOverdueBorrows,
   createBorrowAdmin,
   deleteBorrow,
+  exportBorrowHistory,
 } = require('../controllers/borrowController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -23,6 +24,7 @@ router.patch('/:id/return', returnBook);
 // Admin and user routes (with different access levels)
 router.get('/', getAllBorrows);
 router.get('/history/:userId', getBorrowHistory);
+router.get('/history/:userId/export', exportBorrowHistory);
 
 // Admin only routes
 router.post('/admin', authorize('admin'), createBorrowAdmin);

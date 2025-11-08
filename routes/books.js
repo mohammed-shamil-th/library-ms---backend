@@ -23,8 +23,9 @@ router.post('/', protect, authorize('admin'), addBook);
 router.get('/', getBooks);
 
 // @route   GET /api/books/search
-// @desc    Search books by title, author, or ISBN
+// @desc    Search books (DEPRECATED - use GET /api/books?search=query instead)
 // @access  Public
+// @deprecated The unified GET /api/books endpoint now handles search via ?search=query parameter
 router.get('/search', searchBooks);
 
 // @route   PATCH /api/books/:id/stock

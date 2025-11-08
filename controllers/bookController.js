@@ -100,7 +100,7 @@ const addBook = async (req, res) => {
   }
 };
 
-// @desc    Get all books with pagination and filters
+// @desc    Get all books with pagination, filters, and search (unified)
 // @route   GET /api/books
 // @access  Public
 const getBooks = async (req, res) => {
@@ -108,6 +108,8 @@ const getBooks = async (req, res) => {
     const {
       page = 1,
       limit = 10,
+      search, // Unified search parameter
+      q, // Also support 'q' for backward compatibility
       category,
       language,
       availability,
@@ -115,26 +117,111 @@ const getBooks = async (req, res) => {
       order = 'asc',
     } = req.query;
 
-    // Build query
-    const query = {};
+    // Use 'search' or 'q' (backward compatibility)
+    const searchQuery = search || q;
 
+    // Build aggregation pipeline
+    const pipeline = [];
+
+    // Stage 1: $match - Filter documents
+    const matchStage = {};
+
+    // Add search conditions
+    if (searchQuery && searchQuery.trim()) {
+      const searchTerm = searchQuery.trim();
+      matchStage.$or = [
+        { title: new RegExp(searchTerm, 'i') },
+        { author: new RegExp(searchTerm, 'i') },
+        { isbn: searchTerm.replace(/-/g, '') }, // Exact match for ISBN (normalized)
+      ];
+    }
+
+    // Add category filter
     if (category) {
-      query.category = category;
+      matchStage.category = category;
     }
 
+    // Add language filter
     if (language) {
-      query.language = language;
+      matchStage.language = language;
     }
 
+    // Add availability filter
     if (availability === 'available') {
-      query.availableCopies = { $gt: 0 };
+      matchStage.availableCopies = { $gt: 0 };
     } else if (availability === 'out_of_stock') {
-      query.availableCopies = 0;
+      matchStage.availableCopies = 0;
     } else if (availability === 'low_stock') {
-      query.availableCopies = { $lte: 2, $gt: 0 };
+      matchStage.availableCopies = { $lte: 2, $gt: 0 };
     }
 
-    // Build sort object
+    // Only add $match if there are filter conditions
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
+
+    // Stage 2: $addFields - Add computed availability status
+    pipeline.push({
+      $addFields: {
+        availabilityStatus: {
+          $cond: [
+            { $eq: ['$availableCopies', 0] },
+            'out_of_stock',
+            {
+              $cond: [
+                { $lte: ['$availableCopies', 2] },
+                'low_stock',
+                'available',
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    // Stage 3: $lookup - Join with User collection for addedBy
+    pipeline.push({
+      $lookup: {
+        from: 'users',
+        localField: 'addedBy',
+        foreignField: '_id',
+        as: 'addedBy',
+      },
+    });
+
+    // Stage 4: $unwind - Flatten addedBy array
+    pipeline.push({
+      $unwind: {
+        path: '$addedBy',
+        preserveNullAndEmptyArrays: true,
+      },
+    });
+
+    // Stage 5: $project - Select only needed fields from addedBy
+    pipeline.push({
+      $project: {
+        title: 1,
+        author: 1,
+        isbn: 1,
+        category: 1,
+        description: 1,
+        coverImage: 1,
+        publishedYear: 1,
+        totalCopies: 1,
+        availableCopies: 1,
+        language: 1,
+        pages: 1,
+        publisher: 1,
+        availabilityStatus: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        'addedBy._id': 1,
+        'addedBy.name': 1,
+        'addedBy.email': 1,
+      },
+    });
+
+    // Stage 6: $sort
     const sortOrder = order === 'desc' ? -1 : 1;
     let sortObj = {};
 
@@ -150,46 +237,42 @@ const getBooks = async (req, res) => {
         break;
       case 'popularity':
         // For now, sort by createdAt (newest first)
-        // Can be enhanced with actual borrow count later
+        // Can be enhanced with actual borrow count using $lookup later
         sortObj = { createdAt: -1 };
         break;
       default:
         sortObj = { title: sortOrder };
     }
 
-    // Calculate pagination
+    pipeline.push({ $sort: sortObj });
+
+    // Stage 7: $facet - Get both data and count in one query
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
     const skip = (pageNum - 1) * limitNum;
 
-    // Execute query
-    const books = await Book.find(query)
-      .populate('addedBy', 'name email')
-      .sort(sortObj)
-      .skip(skip)
-      .limit(limitNum)
-      .lean();
-
-    // Get total count for pagination
-    const total = await Book.countDocuments(query);
-
-    // Add availability status to each book
-    const booksWithStatus = books.map((book) => {
-      let status = 'available';
-      if (book.availableCopies === 0) {
-        status = 'out_of_stock';
-      } else if (book.availableCopies <= 2) {
-        status = 'low_stock';
-      }
-      return {
-        ...book,
-        availabilityStatus: status,
-      };
+    pipeline.push({
+      $facet: {
+        data: [
+          { $skip: skip },
+          { $limit: limitNum },
+        ],
+        pagination: [
+          { $count: 'total' },
+        ],
+      },
     });
+
+    // Execute aggregation
+    const result = await Book.aggregate(pipeline);
+
+    // Extract data and pagination
+    const books = result[0]?.data || [];
+    const total = result[0]?.pagination[0]?.total || 0;
 
     res.status(200).json({
       success: true,
-      data: booksWithStatus,
+      data: books,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -501,78 +584,14 @@ const deleteBook = async (req, res) => {
   }
 };
 
-// @desc    Search books by title, author, or ISBN
+// @desc    Search books (DEPRECATED - use GET /api/books?search=query instead)
 // @route   GET /api/books/search
 // @access  Public
+// @deprecated Use GET /api/books?search=query instead
 const searchBooks = async (req, res) => {
-  try {
-    const { q, page = 1, limit = 10 } = req.query;
-
-    if (!q || q.trim() === '') {
-      return res.status(400).json({
-        success: false,
-        message: 'Search query is required',
-      });
-    }
-
-    // Build search query (case-insensitive)
-    const searchRegex = new RegExp(q.trim(), 'i');
-    const query = {
-      $or: [
-        { title: searchRegex },
-        { author: searchRegex },
-        { isbn: q.trim().replace(/-/g, '') }, // Exact match for ISBN
-      ],
-    };
-
-    // Calculate pagination
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
-    const skip = (pageNum - 1) * limitNum;
-
-    // Execute search
-    const books = await Book.find(query)
-      .populate('addedBy', 'name email')
-      .sort({ title: 1 })
-      .skip(skip)
-      .limit(limitNum)
-      .lean();
-
-    // Get total count
-    const total = await Book.countDocuments(query);
-
-    // Add availability status
-    const booksWithStatus = books.map((book) => {
-      let status = 'available';
-      if (book.availableCopies === 0) {
-        status = 'out_of_stock';
-      } else if (book.availableCopies <= 2) {
-        status = 'low_stock';
-      }
-      return {
-        ...book,
-        availabilityStatus: status,
-      };
-    });
-
-    res.status(200).json({
-      success: true,
-      data: booksWithStatus,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        pages: Math.ceil(total / limitNum),
-      },
-    });
-  } catch (error) {
-    console.error('Search books error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while searching books',
-      error: error.message,
-    });
-  }
+  // Redirect to unified endpoint for backward compatibility
+  req.query.search = req.query.q;
+  return getBooks(req, res);
 };
 
 // @desc    Update book stock quantity
